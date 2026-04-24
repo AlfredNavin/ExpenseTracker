@@ -4,7 +4,7 @@ const amountSchema = z
   .string()
   .trim()
   .min(1, "Amount is required")
-  .regex(/^\d+(\.\d{1,2})?$/, "Amount must be a number with up to 2 decimals")
+  .regex(/^-?\d+(\.\d{1,2})?$/, "Amount must be a number with up to 2 decimals")
   .refine((v) => Number(v) > 0, "Amount must be greater than 0")
   .refine(
     (v) => Number(v) < 1_000_000_000_000,
@@ -40,5 +40,7 @@ export type CreateExpenseInput = z.infer<typeof createExpenseSchema>;
 
 export const listQuerySchema = z.object({
   category: z.string().trim().min(1).max(64).optional(),
-  sort: z.enum(["date_desc"]).optional(),
+  sort: z.enum(["date_desc", "date_asc"]).optional(),
 });
+
+export type SortOption = "date_desc" | "date_asc";

@@ -26,9 +26,9 @@ export async function GET(request: Request) {
   const where = category ? eq(expenses.category, category) : undefined;
 
   const orderBy =
-    sort === "date_desc"
-      ? [desc(expenses.date), desc(expenses.createdAt)]
-      : [asc(expenses.date), asc(expenses.createdAt)];
+    sort === "date_asc"
+      ? [asc(expenses.date), asc(expenses.createdAt)]
+      : [desc(expenses.date), desc(expenses.createdAt)];
 
   const rows = await db
     .select()

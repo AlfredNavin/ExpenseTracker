@@ -1,5 +1,5 @@
 import type { Expense } from "./types";
-import type { CreateExpenseInput } from "./validation";
+import type { CreateExpenseInput, SortOption } from "./validation";
 
 export class ApiError extends Error {
   status: number;
@@ -30,7 +30,7 @@ async function handle<T>(res: Response): Promise<T> {
 
 export type ListParams = {
   category?: string;
-  sort?: "date_desc";
+  sort?: SortOption;
 };
 
 export async function listExpenses(

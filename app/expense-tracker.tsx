@@ -8,19 +8,26 @@ import {
 } from "@tanstack/react-query";
 import { ApiError, createExpense, listExpenses } from "@/lib/api";
 import type { Expense } from "@/lib/types";
-import { formatINR, sumAmounts } from "@/lib/money";
+import type { SortOption } from "@/lib/validation";
+import { formatINR, sumAmounts, toPaise } from "@/lib/money";
 import { ExpenseForm } from "./expense-form";
 
 type Filters = {
   category: string; // "" = all
+  sort: SortOption;
 };
 
 const LIST_KEY = (filters: Filters) =>
-  ["expenses", { category: filters.category || null, sort: "date_desc" }] as const;
+  ["expenses", { category: filters.category || null, sort: filters.sort }] as const;
+
+const SUMMARY_KEY = ["expenses", { category: null, sort: "date_desc" }] as const;
 
 export function ExpenseTracker() {
   const qc = useQueryClient();
-  const [filters, setFilters] = useState<Filters>({ category: "" });
+  const [filters, setFilters] = useState<Filters>({
+    category: "",
+    sort: "date_desc",
+  });
 
   const listQuery = useQuery({
     queryKey: LIST_KEY(filters),
@@ -28,10 +35,17 @@ export function ExpenseTracker() {
       listExpenses(
         {
           category: filters.category || undefined,
-          sort: "date_desc",
+          sort: filters.sort,
         },
         signal,
       ),
+  });
+
+  // Unfiltered list powers the per-category summary so it always reflects
+  // the full picture regardless of which filter is applied.
+  const summaryQuery = useQuery({
+    queryKey: SUMMARY_KEY,
+    queryFn: ({ signal }) => listExpenses({ sort: "date_desc" }, signal),
   });
 
   const createMutation = useMutation({
@@ -49,15 +63,24 @@ export function ExpenseTracker() {
       };
 
       const previous = qc.getQueriesData<Expense[]>({ queryKey: ["expenses"] });
-      qc.setQueriesData<Expense[]>({ queryKey: ["expenses"] }, (old) => {
-        if (!old) return old;
+      for (const [key, old] of previous) {
+        if (!old) continue;
+        const keyFilters = key[1] as {
+          category: string | null;
+          sort: SortOption;
+        };
+        const matchesCategory =
+          !keyFilters.category || keyFilters.category === input.category;
+        if (!matchesCategory) continue;
+
         const next = [optimistic, ...old.filter((e) => e.id !== input.id)];
+        const dir = keyFilters.sort === "date_asc" ? 1 : -1;
         next.sort((a, b) => {
-          if (a.date !== b.date) return a.date < b.date ? 1 : -1;
-          return a.createdAt < b.createdAt ? 1 : -1;
+          if (a.date !== b.date) return a.date < b.date ? dir : -dir;
+          return a.createdAt < b.createdAt ? dir : -dir;
         });
-        return next;
-      });
+        qc.setQueryData(key, next);
+      }
 
       return { previous };
     },
@@ -74,18 +97,44 @@ export function ExpenseTracker() {
   });
 
   const expenses = listQuery.data ?? [];
+  const allExpenses = summaryQuery.data ?? [];
 
   const categories = useMemo(() => {
     const set = new Set<string>();
-    for (const e of expenses) set.add(e.category);
+    for (const e of allExpenses) set.add(e.category);
+    // Include the active filter even if it's not yet in the summary (stale).
+    if (filters.category) set.add(filters.category);
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [expenses]);
+  }, [allExpenses, filters.category]);
 
   const total = useMemo(() => sumAmounts(expenses.map((e) => e.amount)), [
     expenses,
   ]);
 
+  const perCategory = useMemo(() => {
+    const groups = new Map<string, string[]>();
+    for (const e of allExpenses) {
+      const arr = groups.get(e.category) ?? [];
+      arr.push(e.amount);
+      groups.set(e.category, arr);
+    }
+    return Array.from(groups.entries())
+      .map(([category, amounts]) => ({
+        category,
+        total: sumAmounts(amounts),
+        count: amounts.length,
+      }))
+      .sort((a, b) => {
+        // Largest total first (BigInt compare for correctness).
+        const ap = toPaise(a.total);
+        const bp = toPaise(b.total);
+        if (ap !== bp) return ap < bp ? 1 : -1;
+        return a.category.localeCompare(b.category);
+      });
+  }, [allExpenses]);
+
   return (
+    <div className="flex flex-col gap-8">
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
       <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">
@@ -120,25 +169,40 @@ export function ExpenseTracker() {
           </button>
         </div>
 
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <label className="text-sm text-zinc-600 dark:text-zinc-400">
-            Category:
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-1.5 text-sm text-zinc-600 dark:text-zinc-400">
+            <span>Category</span>
+            <select
+              value={filters.category}
+              onChange={(e) =>
+                setFilters((f) => ({ ...f, category: e.target.value }))
+              }
+              className="rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            >
+              <option value="">All</option>
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
           </label>
-          <select
-            value={filters.category}
-            onChange={(e) =>
-              setFilters((f) => ({ ...f, category: e.target.value }))
-            }
-            className="rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-          >
-            <option value="">All</option>
-            {categories.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-          <span className="text-xs text-zinc-500">sorted by date (newest first)</span>
+          <label className="flex items-center gap-1.5 text-sm text-zinc-600 dark:text-zinc-400">
+            <span>Sort</span>
+            <select
+              value={filters.sort}
+              onChange={(e) =>
+                setFilters((f) => ({
+                  ...f,
+                  sort: e.target.value as SortOption,
+                }))
+              }
+              className="rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            >
+              <option value="date_desc">Date: newest first</option>
+              <option value="date_asc">Date: oldest first</option>
+            </select>
+          </label>
         </div>
 
         {listQuery.isPending ? (
@@ -173,6 +237,50 @@ export function ExpenseTracker() {
           </span>
         </div>
       </section>
+    </div>
+
+    {perCategory.length > 0 ? (
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+          Summary by category
+        </h2>
+        <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          {perCategory.map(({ category, total, count }) => (
+            <li
+              key={category}
+              className="flex items-center justify-between gap-3 py-2 text-sm"
+            >
+              <button
+                type="button"
+                onClick={() =>
+                  setFilters((f) => ({
+                    ...f,
+                    category: f.category === category ? "" : category,
+                  }))
+                }
+                className={`text-left font-medium hover:underline ${
+                  filters.category === category ? "text-blue-600" : ""
+                }`}
+                aria-pressed={filters.category === category}
+                title={
+                  filters.category === category
+                    ? "Clear filter"
+                    : `Filter list to ${category}`
+                }
+              >
+                {category}
+              </button>
+              <span className="text-xs text-zinc-500">
+                {count} item{count === 1 ? "" : "s"}
+              </span>
+              <span className="tabular-nums font-semibold">
+                {formatINR(total)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ) : null}
     </div>
   );
 }

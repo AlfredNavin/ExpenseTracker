@@ -174,6 +174,7 @@ export function ExpenseForm({
           type="date"
           value={draft.date}
           onChange={(e) => update("date", e.target.value)}
+          onFocus={(e) => e.currentTarget.showPicker?.()}
           max={todayISO()}
           className="input"
         />
