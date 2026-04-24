@@ -4,8 +4,8 @@ A small personal finance tool: record and review expenses, filter by category, s
 
 Built as a take-home. Aim was **production-like quality on a small feature set**, with real-world conditions (unreliable networks, refreshes, retries) taken seriously.
 
+- **Live:** https://expensetracker-three-mu.vercel.app/
 - **Repo:** https://github.com/AlfredNavin/ExpenseTracker
-- **Live:** _add Vercel URL here after first deploy_
 
 ---
 
