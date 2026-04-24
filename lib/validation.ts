@@ -38,9 +38,23 @@ export const createExpenseSchema = z.object({
 
 export type CreateExpenseInput = z.infer<typeof createExpenseSchema>;
 
+export const DEFAULT_PAGE_LIMIT = 20;
+export const MAX_PAGE_LIMIT = 100;
+
 export const listQuerySchema = z.object({
   category: z.string().trim().min(1).max(64).optional(),
   sort: z.enum(["date_desc", "date_asc"]).optional(),
+  page: z
+    .coerce.number({ error: "page must be a number" })
+    .int("page must be an integer")
+    .min(1, "page must be >= 1")
+    .default(1),
+  limit: z
+    .coerce.number({ error: "limit must be a number" })
+    .int("limit must be an integer")
+    .min(1, "limit must be >= 1")
+    .max(MAX_PAGE_LIMIT, `limit must be <= ${MAX_PAGE_LIMIT}`)
+    .default(DEFAULT_PAGE_LIMIT),
 });
 
 export type SortOption = "date_desc" | "date_asc";

@@ -8,6 +8,7 @@ const nextConfig: NextConfig = {
     return [
       { source: "/expenses", destination: "/api/expenses" },
       { source: "/categories", destination: "/api/categories" },
+      { source: "/summary", destination: "/api/summary" },
     ];
   },
 };

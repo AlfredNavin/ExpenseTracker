@@ -1,4 +1,4 @@
-import type { Expense } from "./types";
+import type { Expense, PagedExpenses, Summary } from "./types";
 import type { CreateExpenseInput, SortOption } from "./validation";
 
 export class ApiError extends Error {
@@ -31,18 +31,21 @@ async function handle<T>(res: Response): Promise<T> {
 export type ListParams = {
   category?: string;
   sort?: SortOption;
+  page?: number;
+  limit?: number;
 };
 
 export async function listExpenses(
   params: ListParams,
   signal?: AbortSignal,
-): Promise<Expense[]> {
+): Promise<PagedExpenses> {
   const url = new URL("/api/expenses", window.location.origin);
   if (params.category) url.searchParams.set("category", params.category);
   if (params.sort) url.searchParams.set("sort", params.sort);
+  if (params.page) url.searchParams.set("page", String(params.page));
+  if (params.limit) url.searchParams.set("limit", String(params.limit));
   const res = await fetch(url, { signal, cache: "no-store" });
-  const body = await handle<{ expenses: Expense[] }>(res);
-  return body.expenses;
+  return handle<PagedExpenses>(res);
 }
 
 export async function createExpense(
@@ -57,8 +60,7 @@ export async function createExpense(
   return body.expense;
 }
 
-export async function listCategories(signal?: AbortSignal): Promise<string[]> {
-  const res = await fetch("/api/categories", { signal, cache: "no-store" });
-  const body = await handle<{ categories: string[] }>(res);
-  return body.categories;
+export async function fetchSummary(signal?: AbortSignal): Promise<Summary> {
+  const res = await fetch("/api/summary", { signal, cache: "no-store" });
+  return handle<Summary>(res);
 }

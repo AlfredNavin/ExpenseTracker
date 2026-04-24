@@ -87,15 +87,46 @@ Create an expense.
 - `409` — `id` already exists with different fields
 
 ### `GET /expenses` (also `GET /api/expenses`)
-List expenses.
+List expenses. **Paginated.**
 
 **Query params** (all optional)
 - `category` — exact-match filter
 - `sort=date_desc` — newest first (by `date`, then `created_at`) — default
 - `sort=date_asc` — oldest first
+- `page` — 1-indexed page number (default `1`, min `1`)
+- `limit` — rows per page (default `20`, min `1`, max `100`)
+
+**Response**
+```json
+{
+  "expenses": [ ... ],
+  "page": 1,
+  "limit": 20,
+  "total": 47,
+  "totalAmount": "12345.67",
+  "hasMore": true
+}
+```
+
+`total` and `totalAmount` are computed over the **full filtered set**, not just the current page. That matters for the brief's requirement: *"the total of the currently visible expenses (after filters/sorting)"* — the user's mental model of "visible" is "matches my filter", not "happens to be on screen right now". Server-side aggregation means paging through doesn't break the total.
+
+### `GET /summary` (also `GET /api/summary`)
+Per-category aggregates across *all* expenses (not filtered). Powers the "Summary by category" panel.
+
+**Response**
+```json
+{
+  "categories": [
+    { "category": "Food",   "count": 12, "totalAmount": "4200.00" },
+    { "category": "Travel", "count":  3, "totalAmount": "1100.50" }
+  ],
+  "total": 15,
+  "totalAmount": "5300.50"
+}
+```
 
 ### `GET /categories` (also `GET /api/categories`)
-Distinct categories, for the filter dropdown.
+Distinct categories, for the filter dropdown. Kept for backwards compatibility; the UI now derives this from `/summary`.
 
 ---
 
@@ -121,10 +152,11 @@ Money is stored as `numeric(14,2)` and carried through the app as a **string**. 
 ## Features
 
 - **Add expense** — amount, category, description, date (required: amount, category, date).
-- **List expenses** — sortable and filterable table.
+- **List expenses** — sortable, filterable, **paginated** table.
+- **Pagination** — 20 per page, with Prev/Next controls. Total and per-page summary are always correct regardless of which page you're on.
 - **Filter by category** — dropdown, auto-populated from existing categories.
 - **Sort by date** — newest-first (default) or oldest-first.
-- **Total** — sum of the currently visible (filtered) list, shown as `Total: ₹X`.
+- **Total** — sum of the currently visible (filtered) list — server-computed across all pages, shown as `Total: ₹X`.
 - **Summary by category** — separate section showing total + count per category across **all** expenses (ignores the active filter so you always see the full picture). Click a category name to apply/clear it as a filter.
 - **Draft persistence** — typing in the form is mirrored to `localStorage`; a refresh mid-compose restores your input.
 - **Inline validation** — amounts must be positive with ≤2 decimals; date is required; errors appear next to the offending field.
@@ -161,8 +193,9 @@ The brief called these out explicitly; here's the mapping.
 
 - **No authentication or multi-user support.** The assignment scopes to "my personal expenses" — single user. Adding auth would have traded time away from the correctness concerns the brief actually emphasizes.
 - **No edit/delete endpoints.** Not in the acceptance criteria. Add-and-review is the scoped loop.
-- **No pagination.** Fine for a personal tool with hundreds of rows; would need cursor pagination past ~10k.
-- **No server-side rendering of the list.** The page ships as a client component because we lean on TanStack Query for the retry / optimistic / cache machinery. An RSC-first approach with Server Actions would be more idiomatic but is a bigger rewrite.
+- **Offset (not cursor) pagination.** Simpler UX, standard `?page=N&limit=20`, fine up to ~10k rows. Cursor pagination is more robust under concurrent inserts (no duplicates/skips when the sort key collides), and would be the right call at higher scale — but adds implementation complexity with no user-visible benefit here.
+- **No optimistic add** (after introducing pagination). Optimistically inserting a row while paginated correctly — shifting all subsequent rows forward across pages — is complex to get right and is the kind of place bugs hide. The current approach: idempotent POST + "Adding…" state + brief invalidation on success. Still retry-safe and still responsive, just not "instant."
+- **No server-side rendering of the list.** The page ships as a client component because we lean on TanStack Query for the retry / cache / pagination machinery. An RSC-first approach with Server Actions would be more idiomatic but is a bigger rewrite.
 - **Styling is intentionally plain.** The brief says "keep styling simple; focus on correctness."
 - **Minimal tests.** 27 Vitest unit tests cover the two places a bug would do the most damage: money arithmetic (`lib/money.test.ts` — including the classic `0.1 + 0.2` float trap and a 1,000-item sum) and input validation (`lib/validation.test.ts` — negative amounts, bad formats, UUID shape, whitespace trimming). Run with `npm test`.
 

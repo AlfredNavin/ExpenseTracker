@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { asc, desc, eq } from "drizzle-orm";
+import { asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { expenses } from "@/lib/db/schema";
 import { createExpenseSchema, listQuerySchema } from "@/lib/validation";
@@ -12,6 +12,8 @@ export async function GET(request: Request) {
   const parsed = listQuerySchema.safeParse({
     category: url.searchParams.get("category") ?? undefined,
     sort: url.searchParams.get("sort") ?? undefined,
+    page: url.searchParams.get("page") ?? undefined,
+    limit: url.searchParams.get("limit") ?? undefined,
   });
 
   if (!parsed.success) {
@@ -21,7 +23,7 @@ export async function GET(request: Request) {
     );
   }
 
-  const { category, sort } = parsed.data;
+  const { category, sort, page, limit } = parsed.data;
 
   const where = category ? eq(expenses.category, category) : undefined;
 
@@ -30,13 +32,38 @@ export async function GET(request: Request) {
       ? [asc(expenses.date), asc(expenses.createdAt)]
       : [desc(expenses.date), desc(expenses.createdAt)];
 
-  const rows = await db
-    .select()
-    .from(expenses)
-    .where(where)
-    .orderBy(...orderBy);
+  const offset = (page - 1) * limit;
 
-  return NextResponse.json({ expenses: rows });
+  // Two queries in parallel: paginated rows, and the aggregate over the
+  // *full* filtered set (so the UI's total/count don't depend on pagination).
+  const [rows, aggregate] = await Promise.all([
+    db
+      .select()
+      .from(expenses)
+      .where(where)
+      .orderBy(...orderBy)
+      .limit(limit)
+      .offset(offset),
+    db
+      .select({
+        count: sql<number>`count(*)::int`,
+        totalAmount: sql<string>`coalesce(sum(${expenses.amount}), 0)::text`,
+      })
+      .from(expenses)
+      .where(where),
+  ]);
+
+  const total = aggregate[0]?.count ?? 0;
+  const totalAmount = aggregate[0]?.totalAmount ?? "0";
+
+  return NextResponse.json({
+    expenses: rows,
+    page,
+    limit,
+    total,
+    totalAmount,
+    hasMore: offset + rows.length < total,
+  });
 }
 
 export async function POST(request: Request) {
